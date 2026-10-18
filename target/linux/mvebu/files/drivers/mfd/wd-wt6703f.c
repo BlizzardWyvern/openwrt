@@ -8,6 +8,7 @@
  */
 
 #include <linux/completion.h>
+#include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -15,6 +16,7 @@
 #include <linux/of_platform.h>
 #include <linux/serdev.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
 
 #include <linux/mfd/wd-wt6703f.h>
 
@@ -29,10 +31,18 @@
 struct wd_wt6703f {
 	struct serdev_device *serdev;
 	struct mutex lock;
-	struct completion reply_ready;
+	struct completion transaction_done;
+	spinlock_t rx_lock;
 	u8 reply_buf[WD_WT6703F_RX_BUF_SIZE];
 	size_t reply_len;
+	u8 rx_buf[WD_WT6703F_RX_BUF_SIZE];
+	size_t rx_len;
+	u8 expected_cmd[WD_WT6703F_FRAME_LEN];
 	bool in_frame;
+	bool expect_reply;
+	bool response_received;
+	bool ack_received;
+	bool transaction_active;
 };
 
 static const u8 wd_wt6703f_device_ready_cmd[WD_WT6703F_FRAME_LEN] = {
@@ -43,34 +53,71 @@ static size_t wd_wt6703f_receive_buf(struct serdev_device *serdev,
 					const u8 *data, size_t count)
 {
 	struct wd_wt6703f *wt6703f = serdev_device_get_drvdata(serdev);
+	unsigned long flags;
 	size_t i;
 
 	for (i = 0; i < count; i++) {
 		u8 byte = data[i];
+		bool complete_transaction = false;
+
+		spin_lock_irqsave(&wt6703f->rx_lock, flags);
+
+		if (!wt6703f->transaction_active)
+			goto next_byte;
 
 		if (!wt6703f->in_frame) {
 			if (byte != WD_WT6703F_CMD_START)
-				continue;
+				goto next_byte;
 
-			wt6703f->reply_len = 0;
+			wt6703f->rx_len = 0;
 			wt6703f->in_frame = true;
 		}
 
-		if (wt6703f->reply_len >= WD_WT6703F_RX_BUF_SIZE) {
+		if (wt6703f->rx_len >= WD_WT6703F_RX_BUF_SIZE) {
 			/*
 			 * Frame too large. Drop it and wait for the next
 			 * start byte.
 			 */
 			wt6703f->in_frame = false;
-			continue;
+			goto next_byte;
 		}
 
-		wt6703f->reply_buf[wt6703f->reply_len++] = byte;
+		wt6703f->rx_buf[wt6703f->rx_len++] = byte;
 
 		if (byte == WD_WT6703F_CMD_STOP) {
+			bool is_ack;
+			bool is_response;
+
 			wt6703f->in_frame = false;
-			complete(&wt6703f->reply_ready);
+
+			is_ack = wt6703f->rx_len == WD_WT6703F_FRAME_LEN &&
+				 wt6703f->rx_buf[1] == WD_WT6703F_ACK;
+			is_response = wt6703f->expect_reply &&
+				      wt6703f->rx_len == WD_WT6703F_FRAME_LEN &&
+				      wt6703f->rx_buf[1] == wt6703f->expected_cmd[1] &&
+				      wt6703f->rx_buf[2] == wt6703f->expected_cmd[2];
+
+			if (is_response && !wt6703f->response_received) {
+				memcpy(wt6703f->reply_buf, wt6703f->rx_buf,
+				       wt6703f->rx_len);
+				wt6703f->reply_len = wt6703f->rx_len;
+				wt6703f->response_received = true;
+			} else if (is_ack) {
+				wt6703f->ack_received = true;
+			}
+
+			complete_transaction =
+				(!wt6703f->expect_reply && wt6703f->ack_received) ||
+				(wt6703f->expect_reply &&
+				 wt6703f->response_received &&
+				 wt6703f->ack_received);
 		}
+
+	next_byte:
+		spin_unlock_irqrestore(&wt6703f->rx_lock, flags);
+
+		if (complete_transaction)
+			complete(&wt6703f->transaction_done);
 	}
 
 	return count;
@@ -85,6 +132,8 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 			u8 *reply, size_t *reply_len)
 {
 	unsigned long timeout;
+	unsigned long flags;
+	int i;
 	int ret;
 
 	if (!wt6703f || !cmd || cmd_len != WD_WT6703F_FRAME_LEN)
@@ -95,31 +144,42 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 
 	mutex_lock(&wt6703f->lock);
 
-	reinit_completion(&wt6703f->reply_ready);
+	spin_lock_irqsave(&wt6703f->rx_lock, flags);
+	reinit_completion(&wt6703f->transaction_done);
+	memcpy(wt6703f->expected_cmd, cmd, cmd_len);
 	wt6703f->reply_len = 0;
+	wt6703f->rx_len = 0;
 	wt6703f->in_frame = false;
+	wt6703f->expect_reply = reply && reply_len;
+	wt6703f->response_received = false;
+	wt6703f->ack_received = false;
+	wt6703f->transaction_active = true;
+	spin_unlock_irqrestore(&wt6703f->rx_lock, flags);
 
 	serdev_device_write_flush(wt6703f->serdev);
 	dev_info(&wt6703f->serdev->dev,
 	 "sending: %*ph\n", (int)cmd_len, cmd);
-	ret = serdev_device_write_buf(wt6703f->serdev, cmd, cmd_len);
-	if (ret < 0)
-		goto out_unlock;
-	if (ret != cmd_len) {
-		ret = -EIO;
-		goto out_unlock;
+	for (i = 0; i < cmd_len; i++) {
+		int written;
+
+		written = serdev_device_write_buf(wt6703f->serdev, &cmd[i], 1);
+		if (written < 0) {
+			ret = written;
+			goto out_unlock;
+		}
+		if (written != 1) {
+			ret = -EIO;
+			goto out_unlock;
+		}
+
+		usleep_range(200, 300);
 	}
 
 	serdev_device_wait_until_sent(wt6703f->serdev, WD_WT6703F_CMD_TIMEOUT);
-	timeout = wait_for_completion_timeout(&wt6703f->reply_ready,
+	timeout = wait_for_completion_timeout(&wt6703f->transaction_done,
 					      WD_WT6703F_CMD_TIMEOUT);
 	if (!timeout) {
 		ret = -ETIMEDOUT;
-		goto out_unlock;
-	}
-
-	if (wt6703f->reply_len < 5) {
-		ret = -EIO;
 		goto out_unlock;
 	}
 
@@ -129,21 +189,8 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 		(int)wt6703f->reply_len,
 		wt6703f->reply_buf);
 
-	if (wt6703f->reply_len != WD_WT6703F_FRAME_LEN) {
-		ret = -EPROTO;
-		goto out_unlock;
-	}
-
-	if (wt6703f->reply_buf[0] != WD_WT6703F_CMD_START ||
-		wt6703f->reply_buf[1] != WD_WT6703F_ACK ||
-		wt6703f->reply_buf[2] != 0x00 ||
-		wt6703f->reply_buf[3] != 0x00 ||
-		wt6703f->reply_buf[4] != 0x00 ||
-		wt6703f->reply_buf[5] != 0x00 ||
-		wt6703f->reply_buf[6] != WD_WT6703F_CMD_STOP) {
-		dev_err(&wt6703f->serdev->dev,
-			"Invalid MCU response: %*ph\n",
-			(int)wt6703f->reply_len, wt6703f->reply_buf);
+	if (wt6703f->expect_reply &&
+	    wt6703f->reply_len != WD_WT6703F_FRAME_LEN) {
 		ret = -EPROTO;
 		goto out_unlock;
 	}
@@ -158,6 +205,9 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 	ret = 0;
 
 out_unlock:
+	spin_lock_irqsave(&wt6703f->rx_lock, flags);
+	wt6703f->transaction_active = false;
+	spin_unlock_irqrestore(&wt6703f->rx_lock, flags);
 	mutex_unlock(&wt6703f->lock);
 	return ret;
 }
@@ -176,7 +226,8 @@ static int wd_wt6703f_probe(struct serdev_device *serdev)
 		return -ENOMEM;
 
 	wt6703f->serdev = serdev;
-	init_completion(&wt6703f->reply_ready);
+	init_completion(&wt6703f->transaction_done);
+	spin_lock_init(&wt6703f->rx_lock);
 	ret = devm_mutex_init(dev, &wt6703f->lock);
 	if (ret)
 		return ret;
