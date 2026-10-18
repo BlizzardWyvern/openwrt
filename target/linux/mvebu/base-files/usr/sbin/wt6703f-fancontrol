@@ -1,0 +1,54 @@
+#!/bin/sh
+
+START_TEMP=45000
+FULL_TEMP=70000
+POLL_INTERVAL=5
+
+find_hwmon_by_name() {
+	for hwmon in /sys/class/hwmon/hwmon*; do
+		[ -r "$hwmon/name" ] || continue
+		[ "$(cat "$hwmon/name" 2>/dev/null)" = "$1" ] && {
+			echo "$hwmon"
+			return
+		}
+	done
+}
+
+read_hottest_temp() {
+	hottest=
+	for input in /sys/class/hwmon/hwmon*/temp*_input; do
+		[ -r "$input" ] || continue
+		temp=$(cat "$input" 2>/dev/null)
+		case "$temp" in
+			''|*[!0-9-]*) continue ;;
+		esac
+		[ "$temp" -lt 0 ] && continue
+		[ -z "$hottest" ] || [ "$temp" -le "$hottest" ] || hottest=$temp
+		[ -n "$hottest" ] || hottest=$temp
+	done
+	echo "$hottest"
+}
+
+fan_hwmon=$(find_hwmon_by_name wt6703f)
+[ -n "$fan_hwmon" ] || exit 1
+[ -w "$fan_hwmon/pwm1" ] || exit 1
+
+last_pwm=
+while :; do
+	hottest=$(read_hottest_temp)
+	if [ -z "$hottest" ]; then
+		pwm=255
+	elif [ "$hottest" -le "$START_TEMP" ]; then
+		pwm=0
+	elif [ "$hottest" -ge "$FULL_TEMP" ]; then
+		pwm=255
+	else
+		pwm=$(( (hottest - START_TEMP) * 255 / (FULL_TEMP - START_TEMP) ))
+	fi
+
+	if [ "$pwm" != "$last_pwm" ]; then
+		echo "$pwm" > "$fan_hwmon/pwm1" 2>/dev/null || exit 1
+		last_pwm=$pwm
+	fi
+	sleep "$POLL_INTERVAL"
+done

@@ -1,0 +1,4 @@
+#!/bin/sh
+
+/etc/init.d/wt6703f-fancontrol enable
+exit 0
