@@ -26,10 +26,6 @@
 			compatible = "wd,wt6703f-hwmon";
 		};
 
-		rtc {
-			compatible = "wd,wt6703f-rtc";
-		};
-
 		wt6703f_leds: leds {
 			compatible = "wd,wt6703f-leds";
 

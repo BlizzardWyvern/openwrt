@@ -73,18 +73,3 @@
  obj-y					+= blink/
 
 +obj-$(CONFIG_LEDS_WD_WT6703F)		+= wd-wt6703f-leds.o
---- a/drivers/rtc/Kconfig
-+++ b/drivers/rtc/Kconfig
-@@ -160,0 +160,7 @@
-+config RTC_DRV_WD_WT6703F
-+	tristate "WD WT6703F RTC"
-+	depends on MFD_WD_WT6703F
-+	help
-+	  Enable RTC support for the WT6703F MCU used in WD My Cloud
-+	  devices.
-+
---- a/drivers/rtc/Makefile
-+++ b/drivers/rtc/Makefile
-@@ -135,2 +135,3 @@
- obj-$(CONFIG_RTC_DRV_ZYNQMP)	+= rtc-zynqmp.o
-+obj-$(CONFIG_RTC_DRV_WD_WT6703F)	+= wd-wt6703f-rtc.o
