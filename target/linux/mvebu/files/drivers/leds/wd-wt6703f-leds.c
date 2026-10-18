@@ -264,5 +264,5 @@ static struct platform_driver wd_wt6703f_led_driver = {
 module_platform_driver(wd_wt6703f_led_driver);
 
 MODULE_DESCRIPTION("WD WT6703F LED driver");
-MODULE_AUTHOR("OpenWrt community");
-MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Alexander Giese <blizzardwyvern@web.de>");
+MODULE_LICENSE("GPL v2");

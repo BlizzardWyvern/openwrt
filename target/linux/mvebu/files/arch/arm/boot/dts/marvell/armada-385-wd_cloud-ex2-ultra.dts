@@ -24,8 +24,6 @@
 
 		wt6703f_hwmon: hwmon {
 			compatible = "wd,wt6703f-hwmon";
-			#thermal-sensor-cells = <0>;
-			#cooling-cells = <2>;
 		};
 
 		rtc {
@@ -48,24 +46,6 @@
 			power_orange: power-orange {
 				color = <LED_COLOR_ID_ORANGE>;
 				function = LED_FUNCTION_STATUS;
-			};
-		};
-	};
-};
-
-/ {
-	thermal-zones {
-		wt6703f {
-			polling-delay-passive = <1000>;
-			polling-delay = <5000>;
-			thermal-sensors = <&wt6703f_hwmon>;
-
-			trips {
-				wt6703f_passive: passive {
-					temperature = <50000>;
-					hysteresis = <5000>;
-					type = "passive";
-				};
 			};
 		};
 	};

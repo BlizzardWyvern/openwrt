@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* WD WT6703F MCU hwmon and thermal driver */
+/* WD WT6703F MCU hwmon driver */
 
 #include <linux/hwmon.h>
 #include <linux/mfd/wd-wt6703f.h>
@@ -7,7 +7,6 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/thermal.h>
 
 #define WD_WT6703F_CMD_LEN	7
 #define WD_WT6703F_FAN_MAX	255
@@ -51,7 +50,6 @@ static const u8 wd_wt6703f_thermal_table[] = {
 struct wd_wt6703f_hwmon {
 	struct wd_wt6703f *mcu;
 	struct mutex lock;
-	struct thermal_cooling_device *cdev;
 	u8 pwm;
 };
 
@@ -179,67 +177,11 @@ static const struct hwmon_chip_info wd_wt6703f_hwmon_chip_info = {
 	.info = wd_wt6703f_hwmon_info,
 };
 
-static int wd_wt6703f_cooling_get_max(struct thermal_cooling_device *cdev,
-				      unsigned long *state)
-{
-	*state = WD_WT6703F_FAN_MAX;
-	return 0;
-}
-
-static int wd_wt6703f_cooling_get_cur(struct thermal_cooling_device *cdev,
-				      unsigned long *state)
-{
-	struct wd_wt6703f_hwmon *priv = cdev->devdata;
-
-	*state = priv->pwm;
-	return 0;
-}
-
-static int wd_wt6703f_cooling_set_cur(struct thermal_cooling_device *cdev,
-				      unsigned long state)
-{
-	struct wd_wt6703f_hwmon *priv = cdev->devdata;
-	int ret;
-
-	if (state > WD_WT6703F_FAN_MAX)
-		return -EINVAL;
-
-	mutex_lock(&priv->lock);
-	ret = wd_wt6703f_set_pwm(priv, state);
-	mutex_unlock(&priv->lock);
-	return ret;
-}
-
-static const struct thermal_cooling_device_ops wd_wt6703f_cooling_ops = {
-	.get_max_state = wd_wt6703f_cooling_get_max,
-	.get_cur_state = wd_wt6703f_cooling_get_cur,
-	.set_cur_state = wd_wt6703f_cooling_set_cur,
-};
-
-static int wd_wt6703f_get_temp(struct thermal_zone_device *tz, int *temp)
-{
-	struct wd_wt6703f_hwmon *priv = thermal_zone_device_priv(tz);
-	long value;
-	int ret;
-
-	mutex_lock(&priv->lock);
-	ret = wd_wt6703f_read_temp(priv, &value);
-	mutex_unlock(&priv->lock);
-	if (!ret)
-		*temp = value;
-	return ret;
-}
-
-static const struct thermal_zone_device_ops wd_wt6703f_thermal_ops = {
-	.get_temp = wd_wt6703f_get_temp,
-};
-
 static int wd_wt6703f_hwmon_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct wd_wt6703f_hwmon *priv;
 	struct device *hwmon_dev;
-	struct thermal_zone_device *tz;
 	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -260,16 +202,6 @@ static int wd_wt6703f_hwmon_probe(struct platform_device *pdev)
 	if (IS_ERR(hwmon_dev))
 		return PTR_ERR(hwmon_dev);
 
-	tz = devm_thermal_of_zone_register(dev, 0, priv, &wd_wt6703f_thermal_ops);
-	if (IS_ERR(tz))
-		dev_warn(dev, "failed to register thermal zone: %ld\n", PTR_ERR(tz));
-
-	priv->cdev = devm_thermal_of_cooling_device_register(
-		dev, dev->of_node, "wt6703f-fan", priv, &wd_wt6703f_cooling_ops);
-	if (IS_ERR(priv->cdev))
-		dev_warn(dev, "failed to register cooling device: %ld\n",
-			 PTR_ERR(priv->cdev));
-
 	return 0;
 }
 
@@ -288,6 +220,6 @@ static struct platform_driver wd_wt6703f_hwmon_driver = {
 };
 module_platform_driver(wd_wt6703f_hwmon_driver);
 
-MODULE_DESCRIPTION("WD WT6703F MCU hwmon and thermal driver");
-MODULE_AUTHOR("OpenWrt community");
-MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("WD WT6703F MCU hwmon driver");
+MODULE_AUTHOR("Alexander Giese <blizzardwyvern@web.de>");
+MODULE_LICENSE("GPL v2");

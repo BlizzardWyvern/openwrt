@@ -27,6 +27,64 @@
  obj-$(CONFIG_MFD_SKY81452)	+= sky81452.o
  obj-$(CONFIG_MFD_IEI_WT61P803_PUZZLE)  += iei-wt61p803-puzzle.o
 +obj-$(CONFIG_MFD_WD_WT6703F) 	+= wd-wt6703f.o
- 
+
  obj-$(CONFIG_INTEL_SOC_PMIC)		+= intel_soc_pmic_crc.o
  obj-$(CONFIG_INTEL_SOC_PMIC_BXTWC)	+= intel_soc_pmic_bxtwc.o
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -2739,3 +2739,11 @@
+ endif # ACPI
+
++config SENSORS_WD_WT6703F_HWMON
++	tristate "WD WT6703F hwmon support"
++	depends on MFD_WD_WT6703F
++	depends on HWMON
++	help
++	  Enable temperature monitoring and fan speed control for the
++	  WD WT6703F MCU.
++
+ endif # HWMON
+--- a/drivers/hwmon/Makefile
++++ b/drivers/hwmon/Makefile
+@@ -251,3 +251,4 @@
+ obj-$(CONFIG_PMBUS)	+= pmbus/
+
+ ccflags-$(CONFIG_HWMON_DEBUG_CHIP) := -DDEBUG
++obj-$(CONFIG_SENSORS_WD_WT6703F_HWMON)	+= wd-wt6703f-hwmon.o
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -1043,4 +1043,13 @@ comment "Simatic LED drivers"
+ comment "Simatic LED drivers"
+ source "drivers/leds/simatic/Kconfig"
++
++config LEDS_WD_WT6703F
++	tristate "WD WT6703F LED support"
++	depends on LEDS_CLASS
++	depends on MFD_WD_WT6703F
++	help
++	  Enable standard LED class devices for the WD WT6703F MCU
++	  status LEDs. The driver supports the blue, red, and orange
++	  power LED modes and the MCU hardware blink mode.
+
+ endif # NEW_LEDS
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -125,2 +125,3 @@
+ obj-y					+= blink/
+
++obj-$(CONFIG_LEDS_WD_WT6703F)		+= wd-wt6703f-leds.o
+--- a/drivers/rtc/Kconfig
++++ b/drivers/rtc/Kconfig
+@@ -160,0 +160,7 @@
++config RTC_DRV_WD_WT6703F
++	tristate "WD WT6703F RTC"
++	depends on MFD_WD_WT6703F
++	help
++	  Enable RTC support for the WT6703F MCU used in WD My Cloud
++	  devices.
++
+--- a/drivers/rtc/Makefile
++++ b/drivers/rtc/Makefile
+@@ -135,2 +135,3 @@
+ obj-$(CONFIG_RTC_DRV_ZYNQMP)	+= rtc-zynqmp.o
++obj-$(CONFIG_RTC_DRV_WD_WT6703F)	+= wd-wt6703f-rtc.o

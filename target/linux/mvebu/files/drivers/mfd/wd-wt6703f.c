@@ -168,8 +168,8 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 	spin_unlock_irqrestore(&wt6703f->rx_lock, flags);
 
 	serdev_device_write_flush(wt6703f->serdev);
-	dev_info(&wt6703f->serdev->dev,
-	 "sending: %*ph\n", (int)cmd_len, cmd);
+	dev_dbg(&wt6703f->serdev->dev,
+		"sending: %*ph\n", (int)cmd_len, cmd);
 	for (i = 0; i < cmd_len; i++) {
 		int written;
 
@@ -194,7 +194,7 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 		goto out_unlock;
 	}
 
-	dev_info(&wt6703f->serdev->dev,
+	dev_dbg(&wt6703f->serdev->dev,
 		"MCU reply (%zu bytes): %*ph\n",
 		wt6703f->reply_len,
 		(int)wt6703f->reply_len,
@@ -288,5 +288,5 @@ static struct serdev_device_driver wd_wt6703f_driver = {
 module_serdev_device_driver(wd_wt6703f_driver);
 
 MODULE_DESCRIPTION("WD WT6703F MCU driver");
-MODULE_AUTHOR("OpenWrt community");
-MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Alexander Giese <blizzardwyvern@web.de>");
+MODULE_LICENSE("GPL v2");

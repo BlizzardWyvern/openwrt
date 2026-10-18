@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* WD WT6703F RTC Driver
- *
- * Provides RTC interface for the WT6703F MCU on WD My Cloud devices.
- * Supports reading/writing date/time and basic alarm functionality.
- */
+/* WD WT6703F RTC driver */
 
 #include <linux/bcd.h>
 #include <linux/kernel.h>
@@ -16,9 +12,8 @@
 
 #define WD_WT6703F_CMD_LEN 7
 #define WD_WT6703F_DATETIME_CMD_LEN 13
-#define WD_WT6703F_RTC_READ_RETRIES 3
+#define WD_WT6703F_RTC_READ_RETRIES	3
 
-/* RTC commands */
 static const u8 wd_wt6703f_rtc_read_cmd[WD_WT6703F_CMD_LEN] = {
 	0xfa, 0x01, 0x08, 0x01, 0x01, 0x00, 0xfb
 };
@@ -165,5 +160,5 @@ static struct platform_driver wd_wt6703f_rtc_driver = {
 module_platform_driver(wd_wt6703f_rtc_driver);
 
 MODULE_DESCRIPTION("WD WT6703F RTC driver");
-MODULE_AUTHOR("OpenWrt community");
-MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Alexander Giese <blizzardwyvern@web.de>");
+MODULE_LICENSE("GPL v2");
