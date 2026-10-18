@@ -7,6 +7,7 @@
 
 #include <dt-bindings/leds/common.h>
 #include <linux/leds.h>
+#include <linux/list.h>
 #include <linux/mfd/wd-wt6703f.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
@@ -16,6 +17,13 @@
 #include <linux/slab.h>
 
 #define WD_WT6703F_CMD_LEN 7
+
+struct wd_wt6703f_led;
+
+struct wd_wt6703f_led_group {
+	struct mutex lock;
+	struct list_head leds;
+};
 
 static const u8 wd_wt6703f_led_off[WD_WT6703F_CMD_LEN] =
 	{ 0xfa, 0x26, 0x00, 0x01, 0x00, 0x01, 0xfb };
@@ -35,7 +43,8 @@ static const u8 wd_wt6703f_led_orange_blink[WD_WT6703F_CMD_LEN] =
 struct wd_wt6703f_led {
 	struct led_classdev cdev;
 	struct wd_wt6703f *mcu;
-	struct mutex lock;
+	struct wd_wt6703f_led_group *group;
+	struct list_head node;
 	enum led_brightness brightness;
 	u8 cmd_on[WD_WT6703F_CMD_LEN];
 	u8 cmd_blink[WD_WT6703F_CMD_LEN];
@@ -49,29 +58,38 @@ static inline struct wd_wt6703f_led *cdev_to_wd_wt6703f_led(struct led_classdev 
 
 static int wd_wt6703f_led_exec(struct wd_wt6703f_led *priv, const u8 *cmd)
 {
-	u8 response[16];
-	size_t response_len = sizeof(response);
-
 	return wd_wt6703f_exec(priv->mcu, cmd, WD_WT6703F_CMD_LEN,
-			      response, &response_len);
+			      NULL, NULL);
 }
 
 static int wd_wt6703f_led_brightness_set_blocking(struct led_classdev *cdev,
 						   enum led_brightness brightness)
 {
 	struct wd_wt6703f_led *priv = cdev_to_wd_wt6703f_led(cdev);
+	struct wd_wt6703f_led *other;
 	const u8 *cmd;
 	int ret;
 
 	cmd = (brightness == LED_OFF) ? wd_wt6703f_led_off : priv->cmd_on;
+	mutex_lock(&priv->group->lock);
 	ret = wd_wt6703f_led_exec(priv, cmd);
-	if (ret)
+	if (ret) {
+		mutex_unlock(&priv->group->lock);
 		return ret;
+	}
 
-	mutex_lock(&priv->lock);
 	priv->brightness = brightness ? LED_ON : LED_OFF;
 	priv->blinking = false;
-	mutex_unlock(&priv->lock);
+	if (brightness != LED_OFF) {
+		list_for_each_entry(other, &priv->group->leds, node) {
+			if (other == priv)
+				continue;
+			other->brightness = LED_OFF;
+			other->cdev.brightness = LED_OFF;
+			other->blinking = false;
+		}
+	}
+	mutex_unlock(&priv->group->lock);
 
 	return 0;
 }
@@ -81,9 +99,9 @@ static enum led_brightness wd_wt6703f_led_brightness_get(struct led_classdev *cd
 	struct wd_wt6703f_led *priv = cdev_to_wd_wt6703f_led(cdev);
 	enum led_brightness brightness;
 
-	mutex_lock(&priv->lock);
+	mutex_lock(&priv->group->lock);
 	brightness = priv->brightness;
-	mutex_unlock(&priv->lock);
+	mutex_unlock(&priv->group->lock);
 
 	return brightness;
 }
@@ -108,10 +126,21 @@ static int wd_wt6703f_led_set_blink(struct led_classdev *cdev,
 	if (ret)
 		return ret;
 
-	mutex_lock(&priv->lock);
+	mutex_lock(&priv->group->lock);
 	priv->brightness = LED_ON;
 	priv->blinking = true;
-	mutex_unlock(&priv->lock);
+	{
+		struct wd_wt6703f_led *other;
+
+		list_for_each_entry(other, &priv->group->leds, node) {
+			if (other == priv)
+				continue;
+			other->brightness = LED_OFF;
+			other->cdev.brightness = LED_OFF;
+			other->blinking = false;
+		}
+	}
+	mutex_unlock(&priv->group->lock);
 
 	return 0;
 }
@@ -172,10 +201,19 @@ static int wd_wt6703f_led_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct wd_wt6703f *mcu = dev_get_drvdata(dev->parent);
+	struct wd_wt6703f_led_group *group;
 	int ret = 0;
 
 	if (!mcu)
 		return -ENODEV;
+
+	group = devm_kzalloc(dev, sizeof(*group), GFP_KERNEL);
+	if (!group)
+		return -ENOMEM;
+	ret = devm_mutex_init(dev, &group->lock);
+	if (ret)
+		return ret;
+	INIT_LIST_HEAD(&group->leds);
 
 	device_for_each_child_node_scoped(dev, child) {
 		struct wd_wt6703f_led *priv;
@@ -185,11 +223,9 @@ static int wd_wt6703f_led_probe(struct platform_device *pdev)
 		if (!priv)
 			return -ENOMEM;
 
-		ret = devm_mutex_init(dev, &priv->lock);
-		if (ret)
-			return ret;
-
 		priv->mcu = mcu;
+		priv->group = group;
+		INIT_LIST_HEAD(&priv->node);
 		priv->brightness = LED_OFF;
 		priv->blinking = false;
 
@@ -208,6 +244,7 @@ static int wd_wt6703f_led_probe(struct platform_device *pdev)
 		if (ret)
 			return dev_err_probe(dev, ret, "Failed to register WT6703F LED\n");
 
+		list_add_tail(&priv->node, &group->leds);
 		ret = wd_wt6703f_led_apply_default_state(priv, child);
 		if (ret)
 			return dev_err_probe(dev, ret, "Failed to apply default state\n");
