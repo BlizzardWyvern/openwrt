@@ -113,20 +113,17 @@ static int wd_wt6703f_led_set_blink(struct led_classdev *cdev,
 	struct wd_wt6703f_led *priv = cdev_to_wd_wt6703f_led(cdev);
 	int ret;
 
-	if (!*delay_on && !*delay_off) {
-		*delay_on = 500;
-		*delay_off = 500;
-	}
-
 	/* MCU supports a single hardware blink mode per color command. */
 	*delay_on = 500;
 	*delay_off = 500;
 
-	ret = wd_wt6703f_led_exec(priv, priv->cmd_blink);
-	if (ret)
-		return ret;
-
 	mutex_lock(&priv->group->lock);
+	ret = wd_wt6703f_led_exec(priv, priv->cmd_blink);
+	if (ret) {
+		mutex_unlock(&priv->group->lock);
+		return ret;
+	}
+
 	priv->brightness = LED_ON;
 	priv->blinking = true;
 	{
@@ -183,9 +180,7 @@ static int wd_wt6703f_led_setup_color(struct device *dev,
 		memcpy(priv->cmd_on, wd_wt6703f_led_red_on, WD_WT6703F_CMD_LEN);
 		memcpy(priv->cmd_blink, wd_wt6703f_led_red_blink, WD_WT6703F_CMD_LEN);
 		break;
-	case LED_COLOR_ID_AMBER:
 	case LED_COLOR_ID_ORANGE:
-	case LED_COLOR_ID_YELLOW:
 		memcpy(priv->cmd_on, wd_wt6703f_led_orange_on, WD_WT6703F_CMD_LEN);
 		memcpy(priv->cmd_blink, wd_wt6703f_led_orange_blink, WD_WT6703F_CMD_LEN);
 		break;
@@ -254,7 +249,6 @@ static int wd_wt6703f_led_probe(struct platform_device *pdev)
 }
 
 static const struct of_device_id wd_wt6703f_led_of_match[] = {
-	{ .compatible = "wd,wt6703f-led" },
 	{ .compatible = "wd,wt6703f-leds" },
 	{ }
 };
