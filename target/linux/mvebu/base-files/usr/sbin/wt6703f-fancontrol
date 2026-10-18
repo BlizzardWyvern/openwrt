@@ -1,8 +1,13 @@
 #!/bin/sh
 
-START_TEMP=45000
-FULL_TEMP=70000
-POLL_INTERVAL=5
+SYS_LOW=45000
+SYS_HIGH=50000
+DISK_LOW=38000
+DISK_HIGH=45000
+MIN_PWM=80
+MAX_PWM=255
+HYSTERESIS=2000
+POLL_INTERVAL=60
 
 find_hwmon_by_name() {
 	for hwmon in /sys/class/hwmon/hwmon*; do
@@ -14,9 +19,10 @@ find_hwmon_by_name() {
 	done
 }
 
-read_hottest_temp() {
+read_source_temp() {
+	hwmon=$1
 	hottest=
-	for input in /sys/class/hwmon/hwmon*/temp*_input; do
+	for input in "$hwmon"/temp*_input; do
 		[ -r "$input" ] || continue
 		temp=$(cat "$input" 2>/dev/null)
 		case "$temp" in
@@ -29,22 +35,46 @@ read_hottest_temp() {
 	echo "$hottest"
 }
 
+fan_for_temp() {
+	temp=$1
+	low=$2
+	high=$3
+
+	[ "$temp" -gt 0 ] || return
+	if [ "$temp" -gt "$low" ]; then
+		step=$((temp - low))
+		range=$((high - low))
+		[ "$step" -gt "$range" ] && step=$range
+		echo $((MIN_PWM + step * (MAX_PWM - MIN_PWM) / range))
+	elif [ "$temp" -ge $((low - HYSTERESIS)) ] && [ "$last_pwm" -gt 0 ]; then
+		echo "$MIN_PWM"
+	fi
+}
+
 fan_hwmon=$(find_hwmon_by_name wt6703f)
 [ -n "$fan_hwmon" ] || exit 1
 [ -w "$fan_hwmon/pwm1" ] || exit 1
 
-last_pwm=
+last_pwm=$MIN_PWM
+echo "$last_pwm" > "$fan_hwmon/pwm1" || exit 1
 while :; do
-	hottest=$(read_hottest_temp)
-	if [ -z "$hottest" ]; then
-		pwm=255
-	elif [ "$hottest" -le "$START_TEMP" ]; then
-		pwm=0
-	elif [ "$hottest" -ge "$FULL_TEMP" ]; then
-		pwm=255
-	else
-		pwm=$(( (hottest - START_TEMP) * 255 / (FULL_TEMP - START_TEMP) ))
-	fi
+	pwm=0
+	for hwmon in /sys/class/hwmon/hwmon*; do
+		[ -r "$hwmon/name" ] || continue
+		name=$(cat "$hwmon/name" 2>/dev/null)
+		temp=$(read_source_temp "$hwmon")
+		[ -n "$temp" ] || continue
+
+		case "$name" in
+			wt6703f|f10e4078.thermal|f1072004*)
+				candidate=$(fan_for_temp "$temp" "$SYS_LOW" "$SYS_HIGH")
+				;;
+			*)
+				candidate=$(fan_for_temp "$temp" "$DISK_LOW" "$DISK_HIGH")
+				;;
+		esac
+		[ -n "$candidate" ] && [ "$candidate" -gt "$pwm" ] && pwm=$candidate
+	done
 
 	if [ "$pwm" != "$last_pwm" ]; then
 		echo "$pwm" > "$fan_hwmon/pwm1" 2>/dev/null || exit 1
