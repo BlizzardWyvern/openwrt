@@ -21,6 +21,7 @@
 #include <linux/mfd/wd-wt6703f.h>
 
 #define WD_WT6703F_FRAME_LEN		7
+#define WD_WT6703F_MAX_CMD_LEN		32
 #define WD_WT6703F_RX_BUF_SIZE		32
 #define WD_WT6703F_CMD_TIMEOUT		HZ
 
@@ -37,7 +38,7 @@ struct wd_wt6703f {
 	size_t reply_len;
 	u8 rx_buf[WD_WT6703F_RX_BUF_SIZE];
 	size_t rx_len;
-	u8 expected_cmd[WD_WT6703F_FRAME_LEN];
+	u8 expected_cmd[WD_WT6703F_MAX_CMD_LEN];
 	bool in_frame;
 	bool expect_reply;
 	bool response_received;
@@ -95,9 +96,13 @@ static size_t wd_wt6703f_receive_buf(struct serdev_device *serdev,
 				 wt6703f->rx_buf[1] == WD_WT6703F_ACK &&
 				 wt6703f->rx_buf[6] == WD_WT6703F_CMD_STOP;
 			is_response = wt6703f->expect_reply &&
-				      wt6703f->rx_len == WD_WT6703F_FRAME_LEN &&
-				      wt6703f->rx_buf[1] == wt6703f->expected_cmd[1] &&
-				      wt6703f->rx_buf[2] == wt6703f->expected_cmd[2];
+				      wt6703f->rx_len >= WD_WT6703F_FRAME_LEN &&
+				      !memcmp(wt6703f->rx_buf, wt6703f->expected_cmd,
+					      5);
+
+			dev_dbg(&serdev->dev, "received frame (%zu bytes): %*ph\n",
+				wt6703f->rx_len, (int)wt6703f->rx_len,
+				wt6703f->rx_buf);
 
 			if (is_response && !wt6703f->response_received) {
 				memcpy(wt6703f->reply_buf, wt6703f->rx_buf,
@@ -115,9 +120,7 @@ static size_t wd_wt6703f_receive_buf(struct serdev_device *serdev,
 
 			complete_transaction =
 				(!wt6703f->expect_reply && wt6703f->ack_received) ||
-				(wt6703f->expect_reply &&
-				 wt6703f->response_received &&
-				 wt6703f->ack_received);
+				(wt6703f->expect_reply && wt6703f->response_received);
 		}
 
 	next_byte:
@@ -143,7 +146,8 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 	int i;
 	int ret;
 
-	if (!wt6703f || !cmd || cmd_len != WD_WT6703F_FRAME_LEN)
+	if (!wt6703f || !cmd || cmd_len < WD_WT6703F_FRAME_LEN ||
+	    cmd_len > WD_WT6703F_MAX_CMD_LEN)
 		return -EINVAL;
 
 	if (cmd[0] != WD_WT6703F_CMD_START || cmd[cmd_len - 1] != WD_WT6703F_CMD_STOP)
@@ -196,8 +200,7 @@ int wd_wt6703f_exec(struct wd_wt6703f *wt6703f, const u8 *cmd, size_t cmd_len,
 		(int)wt6703f->reply_len,
 		wt6703f->reply_buf);
 
-	if (wt6703f->expect_reply &&
-	    wt6703f->reply_len != WD_WT6703F_FRAME_LEN) {
+	if (wt6703f->expect_reply && !wt6703f->reply_len) {
 		ret = -EPROTO;
 		goto out_unlock;
 	}
