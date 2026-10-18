@@ -91,7 +91,9 @@ static size_t wd_wt6703f_receive_buf(struct serdev_device *serdev,
 			wt6703f->in_frame = false;
 
 			is_ack = wt6703f->rx_len == WD_WT6703F_FRAME_LEN &&
-				 wt6703f->rx_buf[1] == WD_WT6703F_ACK;
+				 wt6703f->rx_buf[0] == WD_WT6703F_CMD_START &&
+				 wt6703f->rx_buf[1] == WD_WT6703F_ACK &&
+				 wt6703f->rx_buf[6] == WD_WT6703F_CMD_STOP;
 			is_response = wt6703f->expect_reply &&
 				      wt6703f->rx_len == WD_WT6703F_FRAME_LEN &&
 				      wt6703f->rx_buf[1] == wt6703f->expected_cmd[1] &&
@@ -102,6 +104,11 @@ static size_t wd_wt6703f_receive_buf(struct serdev_device *serdev,
 				       wt6703f->rx_len);
 				wt6703f->reply_len = wt6703f->rx_len;
 				wt6703f->response_received = true;
+			} else if (is_ack && !wt6703f->expect_reply) {
+				memcpy(wt6703f->reply_buf, wt6703f->rx_buf,
+				       wt6703f->rx_len);
+				wt6703f->reply_len = wt6703f->rx_len;
+				wt6703f->ack_received = true;
 			} else if (is_ack) {
 				wt6703f->ack_received = true;
 			}

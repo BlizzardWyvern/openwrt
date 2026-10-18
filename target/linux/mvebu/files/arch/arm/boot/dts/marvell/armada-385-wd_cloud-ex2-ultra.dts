@@ -26,6 +26,11 @@
 			compatible = "wd,wt6703f-thermal";
 			#thermal-sensor-cells = <0>;
 		};
+
+		wt6703f_fan: fan {
+			compatible = "wd,wt6703f-fan";
+			#cooling-cells = <2>;
+		};
 	};
 };
 

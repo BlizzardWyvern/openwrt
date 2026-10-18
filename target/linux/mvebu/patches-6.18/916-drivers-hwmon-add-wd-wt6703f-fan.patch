@@ -1,0 +1,23 @@
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -2739,3 +2739,13 @@
+ endif # ACPI
+ 
++config SENSORS_WD_WT6703F_FAN
++	tristate "WD WT6703F fan controller"
++	depends on MFD_WD_WT6703F
++	depends on HWMON
++	depends on THERMAL
++	depends on THERMAL_OF
++	help
++	  Enable fan speed control and tachometer monitoring for the
++	  WD WT6703F MCU.
++
+ endif # HWMON
+--- a/drivers/hwmon/Makefile
++++ b/drivers/hwmon/Makefile
+@@ -251,3 +251,4 @@
+ obj-$(CONFIG_PMBUS)		+= pmbus/
+ 
+ ccflags-$(CONFIG_HWMON_DEBUG_CHIP) := -DDEBUG
++obj-$(CONFIG_SENSORS_WD_WT6703F_FAN)	+= wd-wt6703f-fan.o
