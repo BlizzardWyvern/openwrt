@@ -22,13 +22,9 @@
 		compatible = "wd,wt6703f";
 		current-speed = <19200>;
 
-		wt6703f_thermal: thermal-sensor {
-			compatible = "wd,wt6703f-thermal";
+		wt6703f_hwmon: hwmon {
+			compatible = "wd,wt6703f-hwmon";
 			#thermal-sensor-cells = <0>;
-		};
-
-		wt6703f_fan: fan {
-			compatible = "wd,wt6703f-fan";
 			#cooling-cells = <2>;
 		};
 	};
@@ -39,7 +35,7 @@
 		wt6703f {
 			polling-delay-passive = <1000>;
 			polling-delay = <5000>;
-			thermal-sensors = <&wt6703f_thermal>;
+			thermal-sensors = <&wt6703f_hwmon>;
 
 			trips {
 				wt6703f_passive: passive {
